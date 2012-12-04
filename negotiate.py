@@ -9,6 +9,15 @@ import math
 _log = logging.getLogger("neg")
 
 def parse_version(ver):
+    """
+    Parses a dot-separated string version into a tuple.  Number are
+    converted to ints, everything else is left as a string.
+    
+    TODO: Handle +/- separators for semver-style versions.
+    
+    >>> parse_version("1.2.3.beta")
+    (1, 2, 3, 'beta')
+    """
     parts = ver.split(".")
     for i in xrange(len(parts)):
         try:
@@ -19,9 +28,19 @@ def parse_version(ver):
     return tuple(parts)
 
 def format_version(ver_tuple):
+    """
+    Converts a version tuple into a string.
+    
+    >>> format_version((1, 2, 3, "beta"))
+    '1.2.3.beta'
+    """
     return ".".join([str(x) for x in ver_tuple])
 
 class Switch(object):
+    """
+    Switch base class, handles initial protocol version negotiation and 
+    provides methods to check parameters against constraints.
+    """
     VERSIONS_SUPPORTED = ["1.0"]
     TTPS_SUPPORTED = []
 
@@ -107,6 +126,9 @@ class Switch(object):
         return score
 
 class SimpleIPv4Switch(Switch):
+    """
+    A basic IPV4-only switch with only a few fixed parameter sets.
+    """
     TTPS_SUPPORTED = [("org.opennetworking/ttps/IPV4", "2.0"),
                       ("org.opennetworking/ttps/IPV4", "1.0"),
                       ("com.metaswitch/ttps/PrivateSwitch", "2.0"), ]
@@ -173,6 +195,10 @@ class SimpleIPv4Switch(Switch):
             return "ttp_query_resp_err", {"error": "No match"}
 
 class VariableIPv4Switch(Switch):
+    """
+    An IPv4 switch that has a continuous tradeoff between MAC entries
+    and IPv4 entries.
+    """
     TTPS_SUPPORTED = [("org.opennetworking/ttps/IPV4", "1.0")]
 
     def apply_constraints(self, constraints, params):
@@ -200,12 +226,13 @@ class VariableIPv4Switch(Switch):
                     params[cons["param1"]] = min(v1, max_v1)
 
     def on_ttp_query(self, msg):
-        # Assume we have 10,000 memory slots. Each memory slot can hold either
-        # an IPv4 entry or a MAC entry.
+        # Assume we have 10,000 memory slots.
         best_params = None
         best_score = None
         cons = msg["param_constraints"]
 
+        # We can use domain-specific knowledge to write a simple ad-hoc
+        # algorithm rather than needing a full constraint solver.
         for num_macs in xrange(0, 10000, 100):
             num_ips = 10000 - num_macs
             params = {
@@ -225,6 +252,9 @@ class VariableIPv4Switch(Switch):
         return "ttp_query_resp", {"params": best_params}
 
 class OFCP(object):
+    """
+    OFCP, negotiates with a switch to agreea  parameter set.
+    """
     PREFERRED_TTPS = [("org.opennetworking/ttps/IPV4+IPV6", "2.0"),
                       ("org.opennetworking/ttps/IPV4", "2.0"),
                       ("org.opennetworking/ttps/IPV4", "1.0"),
@@ -237,7 +267,8 @@ class OFCP(object):
         _log.info("Using negotiation protocol version %s", resp["version"])
         # TODO Handle different versions differently!
 
-        # (2) Request TTP list. Find best match.
+        # (2) Request TTP list. Find best match.   (Note: a more complex
+        # controller could investigate multiple TTPs.)
         _log.info("Requesting TTP list.")
         _, resp = switch.handle_msg("list_ttps")
         preferred_ttp = None
@@ -306,17 +337,17 @@ class OFCP(object):
         raise NotImplementedError()
 
 def main():
-    _log.critical("****** Scenario (1) simple switch ******")
-    _log.critical("")
     ofcp = OFCP()
+
+    _log.critical("****************************************")
+    _log.critical("****** Scenario (1) simple switch ******")
+    _log.critical("****************************************")
     ipv4_switch = SimpleIPv4Switch()
     ofcp.negotiate_with(ipv4_switch)
 
-    _log.critical("")
-    _log.critical("")
+    _log.critical("******************************************")
     _log.critical("****** Scenario (2) variable switch ******")
-    _log.critical("")
-    ofcp = OFCP()
+    _log.critical("******************************************")
     ipv4_switch = VariableIPv4Switch()
     ofcp.negotiate_with(ipv4_switch)
 
@@ -324,4 +355,8 @@ def main():
 if __name__ == '__main__':
     logging.basicConfig(format="[%(levelname)s] %(message)s",
                         level=logging.DEBUG if "--debug" in sys.argv else logging.INFO)
-    main()
+    if "--test" in sys.argv:
+        import doctest
+        doctest.testmod()
+    else:
+        main()
